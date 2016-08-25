@@ -35,6 +35,8 @@ struct ngx_stream_upstream_rr_peer_s {
     ngx_uint_t                       max_fails;
     time_t                           fail_timeout;
 
+    ngx_stream_shadowsocks_ctx_t    *shadowsocks_ctx;
+
     ngx_uint_t                       down;         /* unsigned  down:1; */
 
 #if (NGX_STREAM_SSL)

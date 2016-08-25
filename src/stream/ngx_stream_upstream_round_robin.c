@@ -100,6 +100,7 @@ ngx_stream_upstream_init_round_robin(ngx_conf_t *cf,
                 peer[n].fail_timeout = server[i].fail_timeout;
                 peer[n].down = server[i].down;
                 peer[n].server = server[i].name;
+                peer[n].shadowsocks_ctx = server[i].shadowsocks_ctx;
 
                 *peerp = &peer[n];
                 peerp = &peer[n].next;

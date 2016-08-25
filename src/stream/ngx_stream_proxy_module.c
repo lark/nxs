@@ -848,6 +848,20 @@ ngx_stream_proxy_init_upstream(ngx_stream_session_t *s)
         }
     }
 
+    {
+        ngx_int_t   ret;
+
+        ret = ngx_stream_proxy_shadowsocks_init(s);
+        if (ret == NGX_ERROR) {
+            ngx_stream_proxy_finalize(s, NGX_ERROR);
+            return;
+        } else if (ret == NGX_AGAIN) {
+            ngx_add_timer(pc->write, pscf->timeout);
+            pc->write->handler = ngx_stream_proxy_connect_handler;
+            return;
+        }
+    }
+
     u->connected = 1;
 
     pc->read->handler = ngx_stream_proxy_upstream_handler;
@@ -1541,6 +1555,14 @@ ngx_stream_proxy_process(ngx_stream_session_t *s, ngx_uint_t from_upstream,
                     src->read->eof = 1;
                 }
 
+                /* in-place encrypt/decrypt */
+                if (from_upstream) {
+                    /* decrypt n bytes from b->last */
+                    ngx_stream_shadowsocks_decrypt(u, b->last, n);
+                } else {
+                    /* encrypt n bytes from b->last */
+                    ngx_stream_shadowsocks_encrypt(u, b->last, n);
+                }
                 *received += n;
                 b->last += n;
                 do_write = 1;

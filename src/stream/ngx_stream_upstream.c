@@ -496,6 +496,49 @@ ngx_stream_upstream_server(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             continue;
         }
 
+        if (ngx_strncmp(value[i].data, "shadowsocks=", 12) == 0) {
+
+            ngx_str_t       method, secret;
+            ngx_int_t       num;
+            u_char         *p;
+
+            method.data = value[i].data + 12;
+            p = (u_char *) ngx_strchr(method.data, ':');
+
+            if (p) {
+                method.len = p - method.data;
+
+                p++;
+                secret.data = p;
+                secret.len = value[i].data + value[i].len - p;
+
+                num = ngx_stream_shadowsocks_cipher_num(method.data, method.len);
+                if (num == -1) {
+                    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                                       "invalid shadowsocks method \"%V\" for upstream \"%V\"", &method, &value[1]);
+                    return NGX_CONF_ERROR;
+                }
+
+                if (secret.len == 0) {
+                    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                                       "invalid shadowsocks secret length (at least 8) for upstream \"%V\"", &value[1]);
+                    return NGX_CONF_ERROR;
+                }
+
+                if (ngx_stream_shadowsocks_init_ctx(cf, us, num, secret) != NGX_OK) {
+                    return NGX_CONF_ERROR;
+                }
+
+                ngx_conf_log_error(NGX_LOG_INFO, cf, 0, "shadowsocks, method %d(%V), secret \"%V\"",
+                                    us->shadowsocks_ctx->method, &method, &secret);
+                continue;
+            }
+
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "invalid shadowsocks parameter \"%V\" for upstream \"%V\"", &value[i], &value[1]);
+            return NGX_CONF_ERROR;
+        }
+
         goto invalid;
     }
 

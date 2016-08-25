@@ -30,6 +30,7 @@ typedef struct {
 
 
 typedef struct ngx_stream_upstream_srv_conf_s  ngx_stream_upstream_srv_conf_t;
+typedef struct ngx_stream_shadowsocks_ctx_s ngx_stream_shadowsocks_ctx_t;
 
 
 typedef ngx_int_t (*ngx_stream_upstream_init_pt)(ngx_conf_t *cf,
@@ -52,6 +53,7 @@ typedef struct {
     ngx_uint_t                         weight;
     ngx_uint_t                         max_fails;
     time_t                             fail_timeout;
+    ngx_stream_shadowsocks_ctx_t      *shadowsocks_ctx;
 
     unsigned                           down:1;
     unsigned                           backup:1;
@@ -116,6 +118,7 @@ typedef struct {
 #endif
     ngx_stream_upstream_resolved_t    *resolved;
     ngx_stream_upstream_state_t       *state;
+    ngx_stream_shadowsocks_ctx_t      *shadowsocks_ctx;
     unsigned                           connected:1;
     unsigned                           proxy_protocol:1;
 } ngx_stream_upstream_t;
