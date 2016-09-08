@@ -15,7 +15,6 @@
 typedef struct {
     ngx_uint_t                              init;
     EVP_CIPHER_CTX                          evp;
-    u_char                                  iv[EVP_MAX_IV_LENGTH];
 } ngx_stream_shadowsocks_cipher_ctx_t;
 
 typedef struct ngx_stream_shadowsocks_ctx_s ngx_stream_shadowsocks_ctx_t;
@@ -43,11 +42,13 @@ ngx_int_t ngx_stream_shadowsocks_cipher_num(u_char *s, size_t len);
 
 ngx_int_t ngx_stream_shadowsocks_init_ctx(ngx_conf_t *cf, ngx_stream_upstream_server_t *us, ngx_int_t method, ngx_str_t secret);
 
+ngx_int_t ngx_stream_shadowsocks_set_cipher(ngx_stream_shadowsocks_ctx_t *ctx, uint8_t *iv, size_t iv_len, int enc);
+
 ngx_int_t ngx_stream_proxy_shadowsocks_init(ngx_stream_session_t *s);
 
 ngx_int_t ngx_stream_shadowsocks_encrypt(ngx_stream_upstream_t *u, u_char *buf, size_t len);
 ngx_int_t ngx_stream_shadowsocks_decrypt(ngx_stream_upstream_t *u, u_char *buf, size_t len);
 
-
+void ngx_stream_shadowsocks_cleanup_ctx(ngx_stream_shadowsocks_ctx_t *ctx);
 
 #endif

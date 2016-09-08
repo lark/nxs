@@ -1558,7 +1558,15 @@ ngx_stream_proxy_process(ngx_stream_session_t *s, ngx_uint_t from_upstream,
                 /* in-place encrypt/decrypt */
                 if (from_upstream) {
                     /* decrypt n bytes from b->last */
-                    ngx_stream_shadowsocks_decrypt(u, b->last, n);
+                    ngx_stream_shadowsocks_ctx_t *ctx = u->shadowsocks_ctx;
+                    if (ctx->method == 0 || ctx->d.cipher.init) {
+                        ngx_stream_shadowsocks_decrypt(u, b->last, n);
+                    } else {
+                        ngx_stream_shadowsocks_set_cipher(ctx, b->last, ctx->iv_len, 0);
+                        ngx_stream_shadowsocks_decrypt(u, b->last + ctx->iv_len, n - ctx->iv_len);
+                        b->pos += ctx->iv_len;
+                        ctx->d.cipher.init = 1;
+                    }
                 } else {
                     /* encrypt n bytes from b->last */
                     ngx_stream_shadowsocks_encrypt(u, b->last, n);
@@ -1714,6 +1722,11 @@ ngx_stream_proxy_finalize(ngx_stream_session_t *s, ngx_uint_t rc)
     if (u->peer.free && u->peer.sockaddr) {
         u->peer.free(&u->peer, u->peer.data, 0);
         u->peer.sockaddr = NULL;
+    }
+
+    if (u->shadowsocks_ctx) {
+        ngx_stream_shadowsocks_cleanup_ctx(u->shadowsocks_ctx);
+        u->shadowsocks_ctx = NULL;
     }
 
     if (pc) {

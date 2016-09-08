@@ -58,6 +58,10 @@ ngx_stream_shadowsocks_cipher_num(u_char *s, size_t len)
     for (n = 0; n < SS_CIPHER_LAST_CIPHER; n++) {
         if (ngx_strlen(supported_ciphers[n]) == len
                 && ngx_strncmp(s, supported_ciphers[n], len) == 0) {
+            /* RC4 and RC4-MD5 are disabled */
+            if (n == SS_CIPHER_RC4 || n == SS_CIPHER_RC4_MD5) {
+                return NGX_ERROR;
+            }
             return n;
         }
     }
@@ -158,8 +162,8 @@ static const EVP_CIPHER *get_cipher(int method)
     if (method <= SS_CIPHER_TABLE || method >= SS_CIPHER_LAST_CIPHER)
         return NULL;
 
-    if (method == SS_CIPHER_RC4_MD5)
-        method = SS_CIPHER_RC4;
+    if (method == SS_CIPHER_RC4 || method == SS_CIPHER_RC4_MD5)
+        return NULL;
 
     return EVP_get_cipherbyname(supported_ciphers[method]);
 }
@@ -234,6 +238,7 @@ ngx_stream_shadowsocks_init_key(ngx_conf_t *cf,
         return NGX_ERROR;
     }
 
+    /* iv is discarded */
     ctx->key_len = EVP_BytesToKey(cipher, md,
                                   NULL,
                                   secret.data, secret.len,
@@ -246,11 +251,8 @@ ngx_stream_shadowsocks_init_key(ngx_conf_t *cf,
         return NGX_ERROR;
     }
 
-    if (ctx->method == SS_CIPHER_RC4_MD5) {
-        ctx->iv_len = 16;
-    } else {
-        ctx->iv_len = EVP_CIPHER_iv_length(cipher);
-    }
+    ctx->iv_len = EVP_CIPHER_iv_length(cipher);
+
     return NGX_OK;
 }
 
@@ -327,6 +329,8 @@ ngx_int_t
 ngx_stream_shadowsocks_encrypt(ngx_stream_upstream_t *u, u_char *buf, size_t len)
 {
     ngx_uint_t      i;
+    ngx_int_t       err;
+    int             n;
     ngx_stream_shadowsocks_ctx_t *ctx;
 
     ctx = u->shadowsocks_ctx;
@@ -338,6 +342,10 @@ ngx_stream_shadowsocks_encrypt(ngx_stream_upstream_t *u, u_char *buf, size_t len
         return 0;
     }
 
+    err = EVP_CipherUpdate(&ctx->e.cipher.evp, buf, &n, buf, len);
+    if (err == 0)
+        return -1;
+
     return 0;
 }
 
@@ -345,6 +353,8 @@ ngx_int_t
 ngx_stream_shadowsocks_decrypt(ngx_stream_upstream_t *u, u_char *buf, size_t len)
 {
     ngx_uint_t      i;
+    ngx_int_t       err;
+    int             n;
     ngx_stream_shadowsocks_ctx_t *ctx;
 
     ctx = u->shadowsocks_ctx;
@@ -356,6 +366,10 @@ ngx_stream_shadowsocks_decrypt(ngx_stream_upstream_t *u, u_char *buf, size_t len
         return 0;
     }
 
+    err = EVP_CipherUpdate(&ctx->d.cipher.evp, buf, &n, buf, len);
+    if (err == 0)
+        return -1;
+
     return 0;
 }
 
@@ -363,16 +377,13 @@ static ngx_int_t
 ngx_stream_shadowsocks_init_cipher_ctx(ngx_stream_shadowsocks_ctx_t *ctx)
 {
     EVP_CIPHER_CTX *evp;
-    ngx_uint_t     *init;
     int             enc;
 
-    for (enc = 0; enc < 1; enc++) {
+    for (enc = 0; enc < 2; enc++) {
         if (enc == 0) {
             evp = &ctx->d.cipher.evp;
-            init = &ctx->d.cipher.init;
         } else {
             evp = &ctx->e.cipher.evp;
-            init = &ctx->e.cipher.init;
         }
 
         EVP_CIPHER_CTX_init(evp);
@@ -384,9 +395,6 @@ ngx_stream_shadowsocks_init_cipher_ctx(ngx_stream_shadowsocks_ctx_t *ctx)
             EVP_CIPHER_CTX_cleanup(evp);
             return NGX_ERROR;
         }
-
-        *init = 1;
-
         if (ctx->method > SS_CIPHER_RC4_MD5)
             EVP_CIPHER_CTX_set_padding(evp, 1);
     }
@@ -394,13 +402,17 @@ ngx_stream_shadowsocks_init_cipher_ctx(ngx_stream_shadowsocks_ctx_t *ctx)
     return NGX_OK;
 }
 
-/*
-static ngx_int_t
-ngx_stream_shadowsocks_set_cipher_iv(ngx_stream_shadowsocks_ctx_t *ctx,
+void ngx_stream_shadowsocks_cleanup_ctx(ngx_stream_shadowsocks_ctx_t *ctx)
+{
+    EVP_CIPHER_CTX_cleanup(&ctx->d.cipher.evp);
+    EVP_CIPHER_CTX_cleanup(&ctx->e.cipher.evp);
+}
+
+ngx_int_t
+ngx_stream_shadowsocks_set_cipher(ngx_stream_shadowsocks_ctx_t *ctx,
         uint8_t *iv, size_t iv_len, int enc)
 {
     EVP_CIPHER_CTX *evp;
-    const u_char   *true_key;
 
     if (enc) {
         RAND_bytes(iv, iv_len);
@@ -409,22 +421,13 @@ ngx_stream_shadowsocks_set_cipher_iv(ngx_stream_shadowsocks_ctx_t *ctx,
         evp = &ctx->d.cipher.evp;
     }
 
-    if (ctx->method == SS_CIPHER_RC4_MD5) {
-        u_char key_iv[32];
-        memcpy(key_iv, ctx->key, 16);
-        memcpy(key_iv + 16, iv, 16);
-        true_key = MD5(key_iv, 32, NULL);
-        iv_len = 0;
-    } else {
-        true_key = ctx->key;
-    }
-
-    if (!EVP_CipherInit_ex(evp, NULL, NULL, true_key, iv, enc)) {
+    if (!EVP_CipherInit_ex(evp, NULL, NULL, ctx->key, iv, enc)) {
         EVP_CIPHER_CTX_cleanup(evp);
         return NGX_ERROR;
     }
+
+    return NGX_OK;
 }
-*/
 
 ngx_int_t
 ngx_stream_proxy_shadowsocks_init(ngx_stream_session_t *s)
@@ -435,7 +438,7 @@ ngx_stream_proxy_shadowsocks_init(ngx_stream_session_t *s)
     ngx_stream_upstream_rr_peer_t      *peer;
     ngx_stream_shadowsocks_ctx_t       *ctx;
     u_char                              buf[64];
-    ssize_t                             n, sent;
+    ssize_t                             n = 0, nr, sent;
 
     c = s->connection;
     u = s->upstream;
@@ -461,13 +464,19 @@ ngx_stream_proxy_shadowsocks_init(ngx_stream_session_t *s)
         if (ngx_stream_shadowsocks_init_cipher_ctx(ctx) != NGX_OK) {
             return NGX_ERROR;
         }
+
+        /* for ciphers other than table, send iv first */
+        ngx_stream_shadowsocks_set_cipher(ctx, buf, ctx->iv_len, 1);
+        ctx->e.cipher.init = 1;
+        n += ctx->iv_len;
     }
 
-    n = ngx_stream_proxy_shadowsocks_command(c, buf);
+    nr = ngx_stream_proxy_shadowsocks_command(c, buf + n);
     if (n == NGX_ERROR)
         return NGX_ERROR;
-    ngx_stream_shadowsocks_encrypt(u, buf, n);
+    ngx_stream_shadowsocks_encrypt(u, buf + n, nr);
 
+    n += nr;
     sent = pc->send(pc, buf, n);
 
     if (sent == NGX_AGAIN) {
